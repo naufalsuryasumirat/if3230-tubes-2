@@ -1,6 +1,8 @@
 #ifndef CONVOLUTION_CU
 #define CONVOLUTION_CU
 
-// Cuda header file
+#include "serial.h"
+
+void parallel_convolution(Matrix *kernel, Matrix *target);
 
 #endif
