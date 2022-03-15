@@ -5,6 +5,8 @@
 
 #define TRACE(x) printf("\n-------------------%d-------------------\n", x)
 
+#define BLOCK 32
+
 // Testing copied matrix
 __global__ void parallel_printing(Matrix *d_kernel) {
   	printf("%d %d\n", d_kernel->row_eff, d_kernel->col_eff);
@@ -34,15 +36,60 @@ __global__ void parallel_convolution(Matrix *kernel, Matrix *target, Matrix *out
 }
 
 __global__ void parallel_merge(int *n) {
-	int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	int left = tid * (NMAX / 16);
-	int right = (tid + 1) * (NMAX / 16) - 1;
+//	int tid = threadIdx.x + blockIdx.x * blockDim.x;
+//	int left = tid * (NMAX / 16);
+//	int right = (tid + 1) * (NMAX / 16) - 1;
 	
-	int mid = left + (right - left) / 2;
-	if (low < high) {
-		merge_sort(n, left, mid);
-		merge_sort(n, mid+1, right);
-		merge_array(n, left, mid, right);
+//	int mid = left + (right - left) / 2;
+//	if (left < right) {
+//		merge_sort(n, left, mid);
+//		merge_sort(n, mid+1, right);
+//		merge_array(n, left, mid, right);
+//	}
+}
+
+__global__ void quicksort(int *n) {
+	#define MAX 300
+	#define NMAX 100
+
+	int pivot, left, right;
+	int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	int arr_left[MAX], arr_right[MAX];
+
+	arr_left[tid] = tid;
+	arr_right[tid] = NMAX - 1;
+
+	while (tid >= 0) {
+		left = arr_left[tid];
+		right = arr_right[tid];
+		if (left < right) {
+		pivot = n[left];
+		while (left < right) {
+			while (n[right] >= pivot && left < right)
+			right--;
+			if (left < right)
+			n[left++] = n[right];
+			while (n[left] < pivot && left < right)
+			left++;
+			if (left < right)
+			n[right--] = n[left];
+		}
+		n[left] = pivot;
+		arr_left[tid + 1] = left + 1;
+		arr_right[tid + 1] = arr_right[tid];
+		arr_right[tid++] = left;
+		if (arr_right[tid] - arr_left[tid] > arr_right[tid - 1] - arr_left[tid - 1]) {
+			int temp = arr_left[tid];
+			arr_left[tid] = arr_left[tid - 1];
+			arr_left[tid - 1] = temp;
+
+			temp = arr_right[tid];
+			arr_right[tid] = arr_right[tid - 1];
+			arr_right[tid - 1] = temp;
+		}
+		}
+		else
+		tid--;
 	}
 }
 
@@ -80,16 +127,21 @@ int main() {
 
 	cudaMalloc((void **)&d_orow, sizeof(int));
 	cudaMalloc((void **)&d_ocol, sizeof(int));
-	cudaMemcpy(d_orow, &orow, sizeof(int), cudaMemcpyHostToDevice);
-	cudaMemcpy(d_ocol, &ocol, sizeof(int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_orow, &orow, sizeof(int), cudaMemcpyHostToDevice); // copying output row size to device
+	cudaMemcpy(d_ocol, &ocol, sizeof(int), cudaMemcpyHostToDevice); // copying output col size to device
 	cudaMemcpy(d_out, &init_out, sizeof(Matrix), cudaMemcpyHostToDevice); // copying initialized output matrix to device
+
+	int size_process = orow * ocol;
+	int thread_per_block = size_process / BLOCK;
+	if (size_process % BLOCK > 0) thread_per_block++;
 	
 	// read each target matrix, compute their convolution matrices, and compute their data ranges
 	for (int i = 0; i < num_targets; i++) {
 		arr_mat[i] = input_matrix(target_row, target_col);
 		// Copy target matrix to device for convolution computation
 		cudaMemcpy(d_target, &arr_mat[i], sizeof(Matrix), cudaMemcpyHostToDevice);
-		parallel_convolution<<<16,16>>>(d_kernel, d_target, d_out, d_orow, d_ocol);
+		// Parallel convolution using cuda
+		parallel_convolution<<<BLOCK,thread_per_block>>>(d_kernel, d_target, d_out, d_orow, d_ocol);
 		// Copy output matrix from computation back to host
 		cudaError err = cudaMemcpy(&arr_mat[i], d_out, sizeof(Matrix), cudaMemcpyDeviceToHost);
 		if (err != cudaSuccess) {
@@ -114,6 +166,16 @@ int main() {
 	clock_t end = clock();
 	double time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
 	printf("time spent: %fs\n", time_spent);
+
+	int *d_orow, *d_ocol;
+    Matrix *d_kernel, *d_target, *d_out;
+
+	// Cleanup
+	cudaFree(d_orow);
+	cudaFree(d_ocol);
+	cudaFree(d_kernel);
+	cudaFree(d_target);
+	cudaFree(d_out);
 	
 	return 0;
 }
