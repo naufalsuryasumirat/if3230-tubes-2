@@ -1,3 +1,4 @@
+.gitignore
 .vscode
 credentials
 test_case

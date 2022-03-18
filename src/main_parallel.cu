@@ -35,70 +35,54 @@ __global__ void parallel_convolution(Matrix *kernel, Matrix *target, Matrix *out
 	}
 }
 
-__global__ void parallel_merge(int *n) {
-//	int tid = threadIdx.x + blockIdx.x * blockDim.x;
-//	int left = tid * (NMAX / 16);
-//	int right = (tid + 1) * (NMAX / 16) - 1;
-	
-//	int mid = left + (right - left) / 2;
-//	if (left < right) {
-//		merge_sort(n, left, mid);
-//		merge_sort(n, mid+1, right);
-//		merge_array(n, left, mid, right);
-//	}
+// Device function to swap two values
+__device__ void swap(int *a, int *b) {
+	int temp = *a;
+	*a = *b;
+	*b = temp;
 }
 
-__global__ void quicksort(int *n) {
-	#define MAX 300
-	#define NMAX 100
-
-	int pivot, left, right;
+// Brick-sort parallelized (Odd-Even Sort)
+__global__ void brick(int* arr,int even,int n) {
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	int arr_left[MAX], arr_right[MAX];
+	int id_1 = tid * 2;
+	int id_2 = id_1 + 1;
+	int id_3 = id_1 + 2;
 
-	arr_left[tid] = tid;
-	arr_right[tid] = NMAX - 1;
+	if (!even && ((id_2) < n)) {
+		if (arr[id_1] > arr[id_2]) {
+			swap(&arr[id_1], &arr[id_2]);
+		}
+	}
 
-	while (tid >= 0) {
-		left = arr_left[tid];
-		right = arr_right[tid];
-		if (left < right) {
-		pivot = n[left];
-		while (left < right) {
-			while (n[right] >= pivot && left < right)
-			right--;
-			if (left < right)
-			n[left++] = n[right];
-			while (n[left] < pivot && left < right)
-			left++;
-			if (left < right)
-			n[right--] = n[left];
+	if (even && ((id_3) < n)) {
+		if (arr[id_2] > arr[id_3]) {
+			swap(&arr[id_2], &arr[id_3]);
 		}
-		n[left] = pivot;
-		arr_left[tid + 1] = left + 1;
-		arr_right[tid + 1] = arr_right[tid];
-		arr_right[tid++] = left;
-		if (arr_right[tid] - arr_left[tid] > arr_right[tid - 1] - arr_left[tid - 1]) {
-			int temp = arr_left[tid];
-			arr_left[tid] = arr_left[tid - 1];
-			arr_left[tid - 1] = temp;
-
-			temp = arr_right[tid];
-			arr_right[tid] = arr_right[tid - 1];
-			arr_right[tid - 1] = temp;
-		}
-		}
-		else
-		tid--;
 	}
 }
 
+// Calculate time difference
+timespec diff(timespec start, timespec end)
+{
+    timespec temp;
+    if ((end.tv_nsec - start.tv_nsec) < 0) {
+        temp.tv_sec = end.tv_sec-start.tv_sec - 1;
+        temp.tv_nsec = 1000000000 + end.tv_nsec - start.tv_nsec;
+    } else {
+        temp.tv_sec = end.tv_sec - start.tv_sec;
+        temp.tv_nsec = end.tv_nsec - start.tv_nsec;
+    }
+    return temp;
+}
+
 int main() {
-  	int kernel_row, kernel_col, target_row, target_col, num_targets;
+	int kernel_row, kernel_col, target_row, target_col, num_targets;
 	int *d_orow, *d_ocol;
-    Matrix *d_kernel, *d_target, *d_out;
+	Matrix *d_kernel, *d_target, *d_out;
+	timespec time_start, time_end, elapsed;
 	
-	clock_t begin = clock();
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time_start);
 
 	// reads kernel's row and column and initalize kernel matrix from input
 	scanf("%d %d", &kernel_row, &kernel_col);
@@ -150,25 +134,29 @@ int main() {
 		arr_range[i] = get_matrix_datarange(&arr_mat[i]); 
 	}
 
-	// sort the data range array
-	merge_sort(arr_range, 0, num_targets - 1);
-	
-	int median = get_median(arr_range, num_targets);
-	int floored_mean = get_floored_mean(arr_range, num_targets);
+	int *tosort, sorted[num_targets];
+	cudaMalloc((void**)&tosort, num_targets*sizeof(int));
+	cudaMemcpy(tosort,arr_range, num_targets*sizeof(int), cudaMemcpyHostToDevice);
 
-	// print the min, max, median, and floored mean of data range array
+	for (int i = 0; i < num_targets; i++) {
+		brick<<<num_targets/2, 1>>>(tosort, i%2, num_targets);
+	}
+
+	cudaMemcpy(sorted,tosort,num_targets*sizeof(int), cudaMemcpyDeviceToHost);
+
+	int median = get_median(sorted, num_targets);
+	int floored_mean = get_floored_mean(sorted, num_targets);
+
 	printf("min:%d\nmax:%d\nmedian:%d\nmean:%d\n", 
-			arr_range[0], 
-			arr_range[num_targets - 1], 
+			sorted[0], 
+			sorted[num_targets - 1], 
 			median, 
 			floored_mean);
-			
-	clock_t end = clock();
-	double time_spent = (double)(end - begin) / CLOCKS_PER_SEC;
-	printf("time spent: %fs\n", time_spent);
 
-	int *d_orow, *d_ocol;
-    Matrix *d_kernel, *d_target, *d_out;
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time_end);
+	elapsed = diff(time_start, time_end);
+
+	printf("time spent: %lds:%ldns\n", elapsed.tv_sec, elapsed.tv_nsec);
 
 	// Cleanup
 	cudaFree(d_orow);
@@ -176,6 +164,7 @@ int main() {
 	cudaFree(d_kernel);
 	cudaFree(d_target);
 	cudaFree(d_out);
+	cudaFree(tosort);
 	
 	return 0;
 }

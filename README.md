@@ -10,7 +10,7 @@
 
     Jumlah Matrix: 10000, Ukuran Kernel: 1x1, Ukuran Matrix: 1x1
 
-    Jumlah Matrix: 1, Ukuran Kernel: 1x1, Ukuran Matrix: 100x100
+    Jumlah Matrix: 1, Ukuran Kernel: 1x1, Ukuran Matrix: 100x100 [paling cepet]
 
     Jumlah Matrix: 1, Ukuran Kernel: 100x100, Ukuran Matrix: 100x100
 
